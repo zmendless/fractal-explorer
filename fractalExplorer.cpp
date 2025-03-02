@@ -18,9 +18,9 @@ constexpr double ESCAPE_RADIUS_SQUARED = 100.0 * 100.0;
 
 // Performance settings
 const int NUM_THREADS = std::thread::hardware_concurrency() > 0 ? std::thread::hardware_concurrency() : 8;
-constexpr int PREVIEW_DOWNSCALE = 12;
+constexpr int PREVIEW_DOWNSCALE = 4;
 constexpr float SCROLL_RENDER_DELAY = 0.1f;
-constexpr int SCREENSHOT_SCALE = 3;
+constexpr int SCREENSHOT_SCALE = 8;
 
 // Rendering state
 struct RenderState {
@@ -35,7 +35,7 @@ struct RenderState {
     int colorScheme = 0;
     bool autoIterations = true;
     int fractalType = 0;
-    bool stripes = true;
+    bool stripes = false;
     float stripeFrequency = 5;
     float stripeIntensity = 10;
     bool innerCalculation = false;
@@ -117,7 +117,7 @@ inline ReturnInfo calculateFractal(double cr, double ci, double jr, double ji, i
     ReturnInfo iterationInfo;
 
     // Early bailout checks for Mandelbrot
-    if (innerCalculation && !isJulia && fractalType == 0) {
+    if (!innerCalculation && !isJulia && fractalType == 0) {
         // Cardioid check
         double q = (cr - 0.25) * (cr - 0.25) + ci * ci;
         if (q * (q + (cr - 0.25)) < 0.25 * ci * ci) {
@@ -651,6 +651,13 @@ int main() {
 
                 case sf::Keyboard::B: // 
                     state.stripeIntensity -= 1;
+                    needsRedraw = true;
+                    viewChanged = false;
+                    pendingHighQualityRender = false;
+                    break;
+
+                case sf::Keyboard::U: // Change stripes type
+                    state.innerCalculation = !state.innerCalculation;
                     needsRedraw = true;
                     viewChanged = false;
                     pendingHighQualityRender = false;
