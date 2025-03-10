@@ -9,24 +9,25 @@
 #include <atomic>
 
 // Window settings
-constexpr int WINDOW_WIDTH = 800;
-constexpr int WINDOW_HEIGHT = 800;
+constexpr int WINDOW_WIDTH = 192 * 4;
+constexpr int WINDOW_HEIGHT = 108 * 4;
 constexpr char WINDOW_TITLE[] = "Fractal Renderer";
 
 // Mandelbrot parameters
 constexpr double ESCAPE_RADIUS_SQUARED = 100.0 * 100.0;
+constexpr double ASPECT_RATIO = static_cast<double>(WINDOW_WIDTH) / WINDOW_HEIGHT;
 
 // Performance settings
 const int NUM_THREADS = std::thread::hardware_concurrency() > 0 ? std::thread::hardware_concurrency() : 8;
 constexpr int PREVIEW_DOWNSCALE = 4;
 constexpr float SCROLL_RENDER_DELAY = 0.1f;
-constexpr int SCREENSHOT_SCALE = 8;
+constexpr int SCREENSHOT_SCALE = 10;
 
 // Rendering state
 struct RenderState {
-    double viewportX = -0.5;
-    double viewportY = 0.0;
-    double viewportSize = 3.0;
+    double viewportX = -1.768622;
+    double viewportY = -0.001132;
+    double viewportHeight = 3.0 / 30000000;
     int maxIterations = 128;
     float colorDensity = 0.2;
     bool showJulia = false;
@@ -39,6 +40,11 @@ struct RenderState {
     float stripeFrequency = 5;
     float stripeIntensity = 10;
     bool innerCalculation = false;
+
+    // Helper to get the viewport width based on aspect ratio
+    double getViewportWidth() const {
+        return viewportHeight * ASPECT_RATIO;
+    }
 };
 
 struct ReturnInfo {
@@ -190,15 +196,17 @@ void renderFractal(sf::Uint8* pixels, const RenderState& state, int width, int h
 
 // Render a region of the fractal (for multi-threading)
 void renderFractalRegion(sf::Uint8* pixels, const RenderState& state, int startY, int endY, int width, int height) {
-    double pixelSize = state.viewportSize / width;
-    double halfSize = state.viewportSize / 2;
+    double pixelHeight = state.viewportHeight / height;
+    double pixelWidth = state.getViewportWidth() / width;
+    double halfHeight = state.viewportHeight / 2;
+    double halfWidth = state.getViewportWidth() / 2;
     const auto& palette = PALETTES[state.colorScheme % PALETTES.size()];
 
     for (int y = startY; y < endY; y++) {
-        double ci = state.viewportY - halfSize + y * pixelSize;
+        double ci = state.viewportY - halfHeight + y * pixelHeight;
 
         for (int x = 0; x < width; x++) {
-            double cr = state.viewportX - halfSize + x * pixelSize;
+            double cr = state.viewportX - halfWidth + x * pixelWidth;
 
             // Calculate iterations
             ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
@@ -231,17 +239,20 @@ void renderFractalRegion(sf::Uint8* pixels, const RenderState& state, int startY
     }
 }
 
+
 // Render low-resolution preview for faster interaction
 void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int height, int downscale) {
-    double pixelSize = state.viewportSize / width;
-    double halfSize = state.viewportSize / 2;
+    double pixelHeight = state.viewportHeight / height;
+    double pixelWidth = state.getViewportWidth() / width;
+    double halfHeight = state.viewportHeight / 2;
+    double halfWidth = state.getViewportWidth() / 2;
     const auto& palette = PALETTES[state.colorScheme % PALETTES.size()];
 
     for (int y = 0; y < height; y += downscale) {
-        double ci = state.viewportY - halfSize + y * pixelSize;
+        double ci = state.viewportY - halfHeight + y * pixelHeight;
 
         for (int x = 0; x < width; x += downscale) {
-            double cr = state.viewportX - halfSize + x * pixelSize;
+            double cr = state.viewportX - halfWidth + x * pixelWidth;
 
             // Calculate iterations
             ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
@@ -265,7 +276,6 @@ void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int h
                 color = interpolateColors(palette[index], palette[(index + 1) % palette.size()], fract);
             }
 
-
             // Fill block with the same color
             for (int by = 0; by < downscale && y + by < height; by++) {
                 for (int bx = 0; bx < downscale && x + bx < width; bx++) {
@@ -279,6 +289,7 @@ void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int h
         }
     }
 }
+
 
 // Save screenshot with location info in filename
 void saveScreenshot(const sf::Texture& texture, const RenderState& state) {
@@ -297,7 +308,7 @@ void saveScreenshot(const sf::Texture& texture, const RenderState& state) {
     std::stringstream filename;
     filename << "fractal_" << (state.showJulia ? "julia_" : "mandelbrot_")
         << std::fixed << std::setprecision(6) << state.viewportX << "_" << state.viewportY
-        << "_zoom_" << std::setprecision(2) << (3.0 / state.viewportSize)
+        << "_zoom_" << std::setprecision(2) << (3.0 / state.viewportX)
         << now << ".png";
 
     screenshot.saveToFile(filename.str());
@@ -316,7 +327,7 @@ void saveHighResScreenshot(const RenderState& state, int width, int height, int 
     // Render the fractal at high resolution
     RenderState hiResState = state;
     // Adjust pixel density without changing view dimensions
-    hiResState.viewportSize = state.viewportSize;
+    hiResState.viewportX = state.viewportX;
 
     // Use multi-threading to render high-res image
     std::vector<std::thread> threads;
@@ -349,7 +360,7 @@ void saveHighResScreenshot(const RenderState& state, int width, int height, int 
     std::stringstream filename;
     filename << "fractal_" << (state.showJulia ? "julia_" : "mandelbrot_")
         << std::fixed << std::setprecision(6) << state.viewportX << "_" << state.viewportY
-        << "_zoom_" << std::setprecision(2) << (3.0 / state.viewportSize)
+        << "_zoom_" << std::setprecision(2) << (3.0 / state.viewportX)
         << "_hires_" << hiResWidth << "x" << hiResHeight << "_"
         << now << ".png";
 
@@ -360,13 +371,12 @@ void saveHighResScreenshot(const RenderState& state, int width, int height, int 
     delete[] hiResPixels;
 }
 
-// Get formatted info string
 std::string getInfoString(const RenderState& state, double mouseX, double mouseY) {
     std::stringstream ss;
     ss << "Mode: " << (state.showJulia ? "Julia" : "Mandelbrot") << "\n";
     ss << "Position: (" << std::fixed << std::setprecision(10) << state.viewportX
         << ", " << state.viewportY << ")\n";
-    ss << "Zoom: " << std::setprecision(2) << (3.0 / state.viewportSize) << "x\n";
+    ss << "Zoom: " << std::setprecision(2) << (3.0 / state.viewportHeight) << "x\n";
     ss << "Iterations: " << state.maxIterations << (state.autoIterations ? " (auto)" : "") << "\n";
 
     if (state.showJulia) {
@@ -384,7 +394,7 @@ std::string getInfoString(const RenderState& state, double mouseX, double mouseY
 // Auto-adjust iterations based on zoom level
 void adjustIterations(RenderState& state) {
     if (state.autoIterations) {
-        double zoomFactor = 3.0 / state.viewportSize;
+        double zoomFactor = 3.0 / state.viewportHeight;
         state.maxIterations = std::min(10000, static_cast<int>(100 * log10(1 + zoomFactor)));
         state.maxIterations = std::max(100, state.maxIterations);
     }
@@ -473,22 +483,22 @@ int main() {
             if (event.type == sf::Event::Closed)
                 window.close();
 
-            // Zoom with mouse wheel
             if (event.type == sf::Event::MouseWheelScrolled) {
                 sf::Vector2i mousePos = sf::Mouse::getPosition(window);
 
                 if (mousePos.x >= 0 && mousePos.x < WINDOW_WIDTH &&
                     mousePos.y >= 0 && mousePos.y < WINDOW_HEIGHT) {
 
-                    double halfSize = state.viewportSize / 2;
-                    double mouseX = state.viewportX - halfSize + mousePos.x * state.viewportSize / WINDOW_WIDTH;
-                    double mouseY = state.viewportY - halfSize + mousePos.y * state.viewportSize / WINDOW_HEIGHT;
+                    double halfWidth = state.getViewportWidth() / 2;
+                    double halfHeight = state.viewportHeight / 2;
+                    double mouseX = state.viewportX - halfWidth + mousePos.x * state.getViewportWidth() / WINDOW_WIDTH;
+                    double mouseY = state.viewportY - halfHeight + mousePos.y * state.viewportHeight / WINDOW_HEIGHT;
 
                     double zoomFactor = (event.mouseWheelScroll.delta > 0) ? 0.5 : 2.0;
 
                     state.viewportX = mouseX + (state.viewportX - mouseX) * zoomFactor;
                     state.viewportY = mouseY + (state.viewportY - mouseY) * zoomFactor;
-                    state.viewportSize *= zoomFactor;
+                    state.viewportHeight *= zoomFactor;
 
                     adjustIterations(state);
 
@@ -516,17 +526,18 @@ int main() {
             if (event.type == sf::Event::MouseMoved) {
                 currentMousePos = sf::Mouse::getPosition(window);
 
-                double halfSize = state.viewportSize / 2;
-                mouseComplexX = state.viewportX - halfSize +
-                    currentMousePos.x * state.viewportSize / WINDOW_WIDTH;
-                mouseComplexY = state.viewportY - halfSize +
-                    currentMousePos.y * state.viewportSize / WINDOW_HEIGHT;
+                double halfWidth = state.getViewportWidth() / 2;
+                double halfHeight = state.viewportHeight / 2;
+                mouseComplexX = state.viewportX - halfWidth +
+                    currentMousePos.x * state.getViewportWidth() / WINDOW_WIDTH;
+                mouseComplexY = state.viewportY - halfHeight +
+                    currentMousePos.y * state.viewportHeight / WINDOW_HEIGHT;
 
                 if (isDragging) {
                     sf::Vector2i delta = lastMousePos - currentMousePos;
 
-                    double deltaX = delta.x * state.viewportSize / WINDOW_WIDTH;
-                    double deltaY = delta.y * state.viewportSize / WINDOW_HEIGHT;
+                    double deltaX = delta.x * state.getViewportWidth() / WINDOW_WIDTH;
+                    double deltaY = delta.y * state.viewportHeight / WINDOW_HEIGHT;
 
                     state.viewportX += deltaX;
                     state.viewportY += deltaY;
@@ -545,7 +556,7 @@ int main() {
                 case sf::Keyboard::R: // Reset view
                     state.viewportX = -0.5;
                     state.viewportY = 0.0;
-                    state.viewportSize = 3.0;
+                    state.viewportHeight = 3.0;
                     adjustIterations(state);
                     needsRedraw = true;
                     viewChanged = false;
