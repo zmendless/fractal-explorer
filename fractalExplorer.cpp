@@ -25,9 +25,9 @@ constexpr int SCREENSHOT_SCALE = 10;
 
 // Rendering state
 struct RenderState {
-    double viewportX = -1.768622;
-    double viewportY = -0.001132;
-    double viewportHeight = 3.0 / 30000000;
+    double viewportX = -0.5;
+    double viewportY = 0;
+    double viewportHeight = 3.0;
     int maxIterations = 128;
     float colorDensity = 0.2;
     bool showJulia = false;
