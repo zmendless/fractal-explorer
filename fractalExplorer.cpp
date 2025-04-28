@@ -9,8 +9,8 @@
 #include <atomic>
 
 // Window settings
-constexpr int WINDOW_WIDTH = 192 * 4;
-constexpr int WINDOW_HEIGHT = 108 * 4;
+constexpr int WINDOW_WIDTH = 192 * 7;
+constexpr int WINDOW_HEIGHT = 108 * 7;
 constexpr char WINDOW_TITLE[] = "Fractal Renderer";
 
 // Mandelbrot parameters
@@ -22,6 +22,9 @@ const int NUM_THREADS = std::thread::hardware_concurrency() > 0 ? std::thread::h
 constexpr int PREVIEW_DOWNSCALE = 4;
 constexpr float SCROLL_RENDER_DELAY = 0.1f;
 constexpr int SCREENSHOT_SCALE = 10;
+
+// Anti-aliasing settings
+constexpr int AA_MAX_SAMPLES = 6; // 4x4 = 16 samples per pixel at maximum
 
 // Rendering state
 struct RenderState {
@@ -40,6 +43,7 @@ struct RenderState {
     float stripeFrequency = 5;
     float stripeIntensity = 10;
     bool innerCalculation = false;
+    bool antiAliasing = false;
 
     // Helper to get the viewport width based on aspect ratio
     double getViewportWidth() const {
@@ -61,7 +65,6 @@ std::string getInfoString(const RenderState& state, double mouseX, double mouseY
 
 // Color palettes
 const std::vector<std::vector<sf::Color>> PALETTES = {
-    // Classic blue-gold palette
     {
         sf::Color(66, 30, 15), sf::Color(25, 7, 26), sf::Color(9, 1, 47),
         sf::Color(4, 4, 73), sf::Color(0, 7, 100), sf::Color(12, 44, 138),
@@ -69,38 +72,9 @@ const std::vector<std::vector<sf::Color>> PALETTES = {
         sf::Color(211, 236, 248), sf::Color(241, 233, 191), sf::Color(248, 201, 95),
         sf::Color(255, 170, 0), sf::Color(204, 128, 0), sf::Color(153, 87, 0),
     },
-    // Fire palette
     {
-        sf::Color(0, 0, 0), sf::Color(20, 0, 0), sf::Color(40, 0, 0),
-        sf::Color(80, 0, 0), sf::Color(120, 20, 0), sf::Color(160, 40, 0),
-        sf::Color(200, 80, 0), sf::Color(240, 120, 0), sf::Color(255, 160, 0),
-        sf::Color(255, 200, 0), sf::Color(255, 240, 40), sf::Color(255, 255, 100),
-        sf::Color(255, 255, 170), sf::Color(255, 255, 220), sf::Color(255, 255, 255),
-    },
-    // Grayscale palette
-    {
-        sf::Color(0, 0, 0), sf::Color(32, 32, 32), sf::Color(64, 64, 64),
-        sf::Color(96, 96, 96), sf::Color(128, 128, 128), sf::Color(160, 160, 160),
-        sf::Color(192, 192, 192), sf::Color(224, 224, 224), sf::Color(255, 255, 255),
-    },
-
-    // Ocean depths palette
-{
-    sf::Color(3, 13, 30), sf::Color(6, 26, 48), sf::Color(9, 38, 67),
-    sf::Color(17, 55, 92), sf::Color(25, 71, 116), sf::Color(33, 88, 140),
-    sf::Color(41, 105, 165), sf::Color(50, 138, 193), sf::Color(64, 174, 224),
-    sf::Color(110, 197, 233), sf::Color(158, 218, 241), sf::Color(198, 236, 248),
-    sf::Color(214, 249, 255), sf::Color(225, 252, 255), sf::Color(240, 255, 255),
-},
-
-// Arctic palette
-{
-    sf::Color(15, 20, 40), sf::Color(20, 30, 65), sf::Color(30, 40, 90),
-    sf::Color(40, 60, 120), sf::Color(65, 90, 150), sf::Color(95, 130, 180),
-    sf::Color(135, 175, 205), sf::Color(175, 205, 225), sf::Color(200, 225, 240),
-    sf::Color(220, 235, 245), sf::Color(230, 243, 250), sf::Color(240, 250, 253),
-    sf::Color(245, 253, 255), sf::Color(250, 255, 255), sf::Color(255, 255, 255),
-}
+        sf::Color(0, 0, 0), sf::Color(255, 255, 255),
+    }
 };
 
 // Linear interpolation for colors
@@ -173,6 +147,70 @@ inline ReturnInfo calculateFractal(double cr, double ci, double jr, double ji, i
     return iterationInfo;
 }
 
+// Calculate anti-aliased pixel color by sampling multiple points
+sf::Color calculateAntiAliasedColor(int x, int y, const RenderState& state, int width, int height, const std::vector<sf::Color>& palette) {
+    double pixelHeight = state.viewportHeight / height;
+    double pixelWidth = state.getViewportWidth() / width;
+    double halfHeight = state.viewportHeight / 2;
+    double halfWidth = state.getViewportWidth() / 2;
+
+    int samples = AA_MAX_SAMPLES + 1; // 1 = 2x2, 2 = 3x3, 3 = 4x4
+
+    // Sample grid
+    std::vector<sf::Color> sampleColors;
+    sampleColors.reserve(samples * samples);
+
+    for (int sy = 0; sy < samples; sy++) {
+        for (int sx = 0; sx < samples; sx++) {
+            // Calculate subpixel position
+            double offsetX = (sx + 0.5) / samples;
+            double offsetY = (sy + 0.5) / samples;
+
+            double cr = state.viewportX - halfWidth + (x + offsetX) * pixelWidth;
+            double ci = state.viewportY - halfHeight + (y + offsetY) * pixelHeight;
+
+            // Calculate iterations for this sample
+            ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
+                state.maxIterations, state.showJulia, state.fractalType, state.stripes,
+                state.stripeFrequency, state.innerCalculation);
+
+            sf::Color color;
+            if (info.iteration == -1) {
+                color = sf::Color(0, 0, 0);
+            }
+            else {
+                float iterations;
+                if (state.stripes) {
+                    iterations = state.stripeIntensity * (info.stripeSum / info.iteration);
+                }
+                else {
+                    iterations = info.smoothIteration * state.colorDensity;
+                }
+                int index = static_cast<int>(iterations) % palette.size();
+                double fract = iterations - std::floor(iterations);
+                color = interpolateColors(palette[index], palette[(index + 1) % palette.size()], fract);
+            }
+
+            sampleColors.push_back(color);
+        }
+    }
+
+    // Average the samples
+    int totalR = 0, totalG = 0, totalB = 0;
+    for (const auto& color : sampleColors) {
+        totalR += color.r;
+        totalG += color.g;
+        totalB += color.b;
+    }
+
+    int sampleCount = sampleColors.size();
+    return sf::Color(
+        static_cast<sf::Uint8>(totalR / sampleCount),
+        static_cast<sf::Uint8>(totalG / sampleCount),
+        static_cast<sf::Uint8>(totalB / sampleCount)
+    );
+}
+
 // Render the fractal using multiple threads
 void renderFractal(sf::Uint8* pixels, const RenderState& state, int width, int height, bool usePreview = false) {
     if (usePreview) {
@@ -203,31 +241,37 @@ void renderFractalRegion(sf::Uint8* pixels, const RenderState& state, int startY
     const auto& palette = PALETTES[state.colorScheme % PALETTES.size()];
 
     for (int y = startY; y < endY; y++) {
-        double ci = state.viewportY - halfHeight + y * pixelHeight;
-
         for (int x = 0; x < width; x++) {
-            double cr = state.viewportX - halfWidth + x * pixelWidth;
-
-            // Calculate iterations
-            ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
-                state.maxIterations, state.showJulia, state.fractalType, state.stripes, state.stripeFrequency, state.innerCalculation);
-
             sf::Color color;
-            if (info.iteration == -1) {
-                color = sf::Color(0, 0, 0);
+
+            // Use anti-aliasing if enabled
+            if (state.antiAliasing) {
+                color = calculateAntiAliasedColor(x, y, state, width, height, palette);
             }
             else {
-                float iterations;
-                if (state.stripes)
-                {
-                    iterations = state.stripeIntensity * (info.stripeSum / info.iteration);
+                // Standard single-sample rendering
+                double cr = state.viewportX - halfWidth + x * pixelWidth;
+                double ci = state.viewportY - halfHeight + y * pixelHeight;
+
+                // Calculate iterations
+                ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
+                    state.maxIterations, state.showJulia, state.fractalType, state.stripes, state.stripeFrequency, state.innerCalculation);
+
+                if (info.iteration == -1) {
+                    color = sf::Color(0, 0, 0);
                 }
                 else {
-                    iterations = info.smoothIteration * state.colorDensity;
+                    float iterations;
+                    if (state.stripes) {
+                        iterations = state.stripeIntensity * (info.stripeSum / info.iteration);
+                    }
+                    else {
+                        iterations = info.smoothIteration * state.colorDensity;
+                    }
+                    int index = static_cast<int>(iterations) % palette.size();
+                    double fract = iterations - std::floor(iterations);
+                    color = interpolateColors(palette[index], palette[(index + 1) % palette.size()], fract);
                 }
-                int index = static_cast<int>(iterations) % palette.size();
-                double fract = iterations - std::floor(iterations);
-                color = interpolateColors(palette[index], palette[(index + 1) % palette.size()], fract);
             }
 
             int pixelIndex = (y * width + x) * 4;
@@ -382,11 +426,6 @@ std::string getInfoString(const RenderState& state, double mouseX, double mouseY
     if (state.showJulia) {
         ss << "Julia seed: (" << std::setprecision(6) << state.juliaX << ", " << state.juliaY << ")\n";
     }
-
-    ss << "Color scheme: " << state.colorScheme + 1 << "/" << PALETTES.size() << "\n";
-    ss << "Mouse: (" << std::setprecision(6) << mouseX << ", " << mouseY << ")\n\n";
-    ss << "Controls: Scroll=Zoom, Drag=Pan, J=Julia/Mandelbrot, C=Colors,\n";
-    ss << "R=Reset, S=Screenshot, I/K=Iterations, A=Auto iterations";
 
     return ss.str();
 }
@@ -560,160 +599,117 @@ int main() {
                     adjustIterations(state);
                     needsRedraw = true;
                     viewChanged = false;
-                    pendingHighQualityRender = false;
+                    pendingHighQualityRender = true;
                     break;
-
                 case sf::Keyboard::J: // Toggle Julia/Mandelbrot
+                    state.showJulia = !state.showJulia;
                     if (!state.showJulia) {
+                        // When switching back to Mandelbrot, reset Julia seed to mouse position
                         state.juliaX = mouseComplexX;
                         state.juliaY = mouseComplexY;
                     }
-                    state.showJulia = !state.showJulia;
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
                     break;
-
                 case sf::Keyboard::C: // Change color scheme
                     state.colorScheme = (state.colorScheme + 1) % PALETTES.size();
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
                     break;
-
-                case sf::Keyboard::S: // Save screenshot
-                    saveScreenshot(texture, state);
+                case sf::Keyboard::S: // Screenshot
+                    if (sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) ||
+                        sf::Keyboard::isKeyPressed(sf::Keyboard::RShift)) {
+                        // High-resolution screenshot
+                        saveHighResScreenshot(state, WINDOW_WIDTH, WINDOW_HEIGHT, SCREENSHOT_SCALE);
+                    }
+                    else {
+                        saveScreenshot(texture, state);
+                    }
                     break;
-
                 case sf::Keyboard::I: // Increase iterations
+                    state.maxIterations = static_cast<int>(state.maxIterations * 1.5);
                     state.autoIterations = false;
-                    state.maxIterations = std::min(10000, state.maxIterations * 2);
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
                     break;
-
                 case sf::Keyboard::K: // Decrease iterations
+                    state.maxIterations = std::max(50, static_cast<int>(state.maxIterations / 1.5));
                     state.autoIterations = false;
-                    state.maxIterations = std::max(100, state.maxIterations / 2);
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
                     break;
-
                 case sf::Keyboard::A: // Toggle auto iterations
                     state.autoIterations = !state.autoIterations;
                     if (state.autoIterations) {
                         adjustIterations(state);
                         needsRedraw = true;
-                        viewChanged = false;
-                        pendingHighQualityRender = false;
                     }
                     break;
-
-                case sf::Keyboard::Up: // Adjust color density
-                    state.colorDensity *= 1.1;
+                case sf::Keyboard::T: // Toggle fractal type
+                    state.fractalType = (state.fractalType + 1) % 2; // Currently 2 types (0=Mandelbrot, 1=Burning Ship)
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
                     break;
-
-                case sf::Keyboard::Down: // Adjust color density
-                    state.colorDensity /= 1.1;
-                    needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
-                    break;
-
-                case sf::Keyboard::T: // Change fractal type
-                    state.fractalType = (state.fractalType + 1) % 2;
-                    needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
-                    break;
-
-                case sf::Keyboard::Z: // Change stripes type
+                case sf::Keyboard::B: // Toggle stripe effect
                     state.stripes = !state.stripes;
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
                     break;
-
-                case sf::Keyboard::M: // Change stripes type
-                    state.stripeFrequency += 0.1;
+                case sf::Keyboard::F: // Toggle anti-aliasing
+                    state.antiAliasing = !state.antiAliasing;
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
+                    pendingHighQualityRender = true;
                     break;
-
-                case sf::Keyboard::N: // Change stripes type
-                    state.stripeFrequency -= 0.1;
-                    needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
-                    break;
-
-                case sf::Keyboard::V: // Change stripes type
-                    state.stripeIntensity += 1;
-                    needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
-                    break;
-
-                case sf::Keyboard::B: // 
-                    state.stripeIntensity -= 1;
-                    needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
-                    break;
-
-                case sf::Keyboard::U: // Change stripes type
+                case sf::Keyboard::N: // Toggle inner calculation
                     state.innerCalculation = !state.innerCalculation;
                     needsRedraw = true;
-                    viewChanged = false;
-                    pendingHighQualityRender = false;
                     break;
-
-                case sf::Keyboard::H: // High-resolution screenshot (H key)
-                    saveHighResScreenshot(state, WINDOW_WIDTH, WINDOW_HEIGHT, SCREENSHOT_SCALE);
+                case sf::Keyboard::Up: // Increase color density
+                    state.colorDensity *= 1.2f;
+                    needsRedraw = true;
+                    break;
+                case sf::Keyboard::Down: // Decrease color density
+                    state.colorDensity /= 1.2f;
+                    needsRedraw = true;
+                    break;
+                case sf::Keyboard::Left: // Decrease stripe frequency
+                    if (state.stripes) {
+                        state.stripeFrequency = std::max(1.0f, state.stripeFrequency - 1.0f);
+                        needsRedraw = true;
+                    }
+                    break;
+                case sf::Keyboard::Right: // Increase stripe frequency
+                    if (state.stripes) {
+                        state.stripeFrequency += 1.0f;
+                        needsRedraw = true;
+                    }
                     break;
                 }
-
             }
         }
 
-        // Check if we need a high-quality render after scrolling stopped
-        if ((viewChanged || pendingHighQualityRender) && !isDragging &&
-            scrollTimer.getElapsedTime().asSeconds() > SCROLL_RENDER_DELAY) {
-            needsRedraw = true;
-            usePreview = false;
+        // Check if we need to render a high-quality image after scrolling/panning stops
+        if (viewChanged && scrollTimer.getElapsedTime().asSeconds() > SCROLL_RENDER_DELAY) {
+            pendingHighQualityRender = true;
             viewChanged = false;
-            pendingHighQualityRender = false;
-
-            renderTimeStr = "Rendering high quality...";
-            if (hasFontLoaded) {
-                performanceText.setString(renderTimeStr);
-                window.draw(performanceText);
-                window.display();
-            }
         }
 
-        // Perform rendering if needed
-        if (needsRedraw) {
-            auto startTime = std::chrono::high_resolution_clock::now();
-            renderFractal(pixels, state, WINDOW_WIDTH, WINDOW_HEIGHT, usePreview);
-            auto endTime = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
-
+        // Perform high-quality render if needed
+        if (pendingHighQualityRender) {
+            startTime = std::chrono::high_resolution_clock::now();
+            renderFractal(pixels, state, WINDOW_WIDTH, WINDOW_HEIGHT, false);
+            endTime = std::chrono::high_resolution_clock::now();
+            duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
             renderTimeStr = "Render time: " + std::to_string(duration) + "ms";
-            if (!usePreview) {
-                renderTimeStr += " (high quality)";
-            }
-
+            texture.update(pixels);
+            pendingHighQualityRender = false;
+        }
+        else if (needsRedraw) {
+            // Use low-quality preview for interactive movements
+            startTime = std::chrono::high_resolution_clock::now();
+            renderFractal(pixels, state, WINDOW_WIDTH, WINDOW_HEIGHT, usePreview);
+            endTime = std::chrono::high_resolution_clock::now();
+            duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+            renderTimeStr = usePreview ? "Preview time: " + std::to_string(duration) + "ms"
+                : "Render time: " + std::to_string(duration) + "ms";
             texture.update(pixels);
         }
 
-        // Update info text
+        // Update text displays
         if (hasFontLoaded) {
             infoText.setString(getInfoString(state, mouseComplexX, mouseComplexY));
             performanceText.setString(renderTimeStr);
@@ -722,13 +718,23 @@ int main() {
         // Draw everything
         window.clear();
         window.draw(sprite);
+
         if (hasFontLoaded) {
+            // Draw semi-transparent background for text
+            sf::RectangleShape textBg(sf::Vector2f(350, 180));
+            textBg.setFillColor(sf::Color(0, 0, 0, 180));
+            textBg.setPosition(5, 5);
+            window.draw(textBg);
+
             window.draw(infoText);
             window.draw(performanceText);
         }
+
         window.display();
     }
 
+    // Clean up
     delete[] pixels;
+
     return 0;
 }
