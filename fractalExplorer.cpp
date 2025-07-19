@@ -360,13 +360,19 @@ void saveScreenshot(const sf::Texture& texture, const RenderState& state) {
 }
 
 void outputStateDetails(const RenderState& state) {
+    std::cout << std::fixed << std::setprecision(25); // Set precision here on cout
+
     std::cout << "--- State Details ---" << '\n';
     std::cout << "x = " << state.viewportX << '\n';
     std::cout << "y = " << state.viewportY << '\n';
     std::cout << "zoom = " << state.viewportHeight << '\n';
     std::cout << "cd = " << state.colorDensity << '\n';
+
+    // If maxIterations is an int, no need for precision
+    std::cout.unsetf(std::ios::fixed); // Unset fixed for default int printing
     std::cout << "maxit = " << state.maxIterations << '\n';
 }
+
 
 // Add this function to create and save high resolution screenshots
 void saveHighResScreenshot(const RenderState& state, int width, int height, int scale) {
