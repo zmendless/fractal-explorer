@@ -19,12 +19,12 @@ constexpr double ASPECT_RATIO = static_cast<double>(WINDOW_WIDTH) / WINDOW_HEIGH
 
 // Performance settings
 const int NUM_THREADS = std::thread::hardware_concurrency() > 0 ? std::thread::hardware_concurrency() : 8;
-constexpr int PREVIEW_DOWNSCALE = 4;
+constexpr int PREVIEW_DOWNSCALE = 2;
 constexpr float SCROLL_RENDER_DELAY = 0.1f;
 constexpr int SCREENSHOT_SCALE = 10;
 
 // Anti-aliasing settings
-constexpr int AA_MAX_SAMPLES = 6; // 4x4 = 16 samples per pixel at maximum
+constexpr int AA_MAX_SAMPLES = 4; // 4x4 = 16 samples per pixel at maximum
 
 // Rendering state
 struct RenderState {
@@ -359,6 +359,15 @@ void saveScreenshot(const sf::Texture& texture, const RenderState& state) {
     std::cout << "Screenshot saved: " << filename.str() << std::endl;
 }
 
+void outputStateDetails(const RenderState& state) {
+    std::cout << "--- State Details ---" << '\n';
+    std::cout << "x = " << state.viewportX << '\n';
+    std::cout << "y = " << state.viewportY << '\n';
+    std::cout << "zoom = " << state.viewportHeight << '\n';
+    std::cout << "cd = " << state.colorDensity << '\n';
+    std::cout << "maxit = " << state.maxIterations << '\n';
+}
+
 // Add this function to create and save high resolution screenshots
 void saveHighResScreenshot(const RenderState& state, int width, int height, int scale) {
     // Create high-resolution pixel buffer
@@ -665,6 +674,9 @@ int main() {
                 case sf::Keyboard::Down: // Decrease color density
                     state.colorDensity /= 1.2f;
                     needsRedraw = true;
+                    break;
+                case sf::Keyboard::P: // Show details
+                    outputStateDetails(state);
                     break;
                 case sf::Keyboard::Left: // Decrease stripe frequency
                     if (state.stripes) {
