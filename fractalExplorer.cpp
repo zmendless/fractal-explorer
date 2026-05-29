@@ -8,25 +8,19 @@
 #include <iomanip>
 #include <atomic>
 
-// Window settings
 constexpr int WINDOW_WIDTH = 192 * 7;
 constexpr int WINDOW_HEIGHT = 108 * 7;
 constexpr char WINDOW_TITLE[] = "Fractal Renderer";
 
-// Mandelbrot parameters
 constexpr double ESCAPE_RADIUS_SQUARED = 100.0 * 100.0;
 constexpr double ASPECT_RATIO = static_cast<double>(WINDOW_WIDTH) / WINDOW_HEIGHT;
 
-// Performance settings
 const int NUM_THREADS = std::thread::hardware_concurrency() > 0 ? std::thread::hardware_concurrency() : 8;
 constexpr int PREVIEW_DOWNSCALE = 2;
 constexpr float SCROLL_RENDER_DELAY = 0.1f;
 constexpr int SCREENSHOT_SCALE = 10;
 
-// Anti-aliasing settings
-constexpr int AA_MAX_SAMPLES = 4; // 4x4 = 16 samples per pixel at maximum
 
-// Rendering state
 struct RenderState {
     double viewportX = -0.5;
     double viewportY = 0;
@@ -45,7 +39,6 @@ struct RenderState {
     bool innerCalculation = false;
     bool antiAliasing = false;
 
-    // Helper to get the viewport width based on aspect ratio
     double getViewportWidth() const {
         return viewportHeight * ASPECT_RATIO;
     }
@@ -57,13 +50,11 @@ struct ReturnInfo {
     double stripeSum;
 };
 
-// Forward declarations
 void renderFractalRegion(sf::Uint8* pixels, const RenderState& state, int startY, int endY, int width, int height);
 void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int height, int downscale);
 void saveScreenshot(const sf::Texture& texture, const RenderState& state);
 std::string getInfoString(const RenderState& state, double mouseX, double mouseY);
 
-// Color palettes
 const std::vector<std::vector<sf::Color>> PALETTES = {
     {
         sf::Color(66, 30, 15), sf::Color(25, 7, 26), sf::Color(9, 1, 47),
@@ -77,7 +68,6 @@ const std::vector<std::vector<sf::Color>> PALETTES = {
     }
 };
 
-// Linear interpolation for colors
 inline sf::Color interpolateColors(const sf::Color& c1, const sf::Color& c2, double factor) {
     return sf::Color(
         static_cast<sf::Uint8>(c1.r + factor * (c2.r - c1.r)),
@@ -86,9 +76,7 @@ inline sf::Color interpolateColors(const sf::Color& c1, const sf::Color& c2, dou
     );
 }
 
-// Fast calculation of fractal iteration count with optimizations
 inline ReturnInfo calculateFractal(double cr, double ci, double jr, double ji, int maxIter, bool isJulia, int fractalType, bool stripes, float stripeFrequency, bool innerCalculation) {
-    // Set initial values based on fractal type
     double zr = isJulia ? cr : 0;
     double zi = isJulia ? ci : 0;
     double cr_actual = isJulia ? jr : cr;
@@ -96,16 +84,13 @@ inline ReturnInfo calculateFractal(double cr, double ci, double jr, double ji, i
 
     ReturnInfo iterationInfo;
 
-    // Early bailout checks for Mandelbrot
     if (!innerCalculation && !isJulia && fractalType == 0) {
-        // Cardioid check
         double q = (cr - 0.25) * (cr - 0.25) + ci * ci;
         if (q * (q + (cr - 0.25)) < 0.25 * ci * ci) {
             iterationInfo.iteration = -1;
             return iterationInfo;
         }
 
-        // Period-2 bulb check
         if ((cr + 1.0) * (cr + 1.0) + ci * ci < 0.0625) {
             iterationInfo.iteration = -1;
             return iterationInfo;
@@ -117,7 +102,6 @@ inline ReturnInfo calculateFractal(double cr, double ci, double jr, double ji, i
     float stripeSum = 0;
     int i = 0;
 
-    // Main iteration loop (optimized)
     while (zr2 + zi2 < ESCAPE_RADIUS_SQUARED) {
         zi = (fractalType == 0) ? 2 * zr * zi : 2 * fabs(zr * zi);
         zi += ci_actual;
@@ -140,36 +124,30 @@ inline ReturnInfo calculateFractal(double cr, double ci, double jr, double ji, i
         }
     }
 
-    // Smooth coloring formula
     iterationInfo.iteration = i;
     iterationInfo.smoothIteration = i + 1 - log(log(zr2 + zi2) / 2) / log(2);
     iterationInfo.stripeSum = stripeSum;
     return iterationInfo;
 }
 
-// Calculate anti-aliased pixel color by sampling multiple points
 sf::Color calculateAntiAliasedColor(int x, int y, const RenderState& state, int width, int height, const std::vector<sf::Color>& palette) {
     double pixelHeight = state.viewportHeight / height;
     double pixelWidth = state.getViewportWidth() / width;
     double halfHeight = state.viewportHeight / 2;
     double halfWidth = state.getViewportWidth() / 2;
 
-    int samples = AA_MAX_SAMPLES + 1; // 1 = 2x2, 2 = 3x3, 3 = 4x4
 
-    // Sample grid
     std::vector<sf::Color> sampleColors;
     sampleColors.reserve(samples * samples);
 
     for (int sy = 0; sy < samples; sy++) {
         for (int sx = 0; sx < samples; sx++) {
-            // Calculate subpixel position
             double offsetX = (sx + 0.5) / samples;
             double offsetY = (sy + 0.5) / samples;
 
             double cr = state.viewportX - halfWidth + (x + offsetX) * pixelWidth;
             double ci = state.viewportY - halfHeight + (y + offsetY) * pixelHeight;
 
-            // Calculate iterations for this sample
             ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
                 state.maxIterations, state.showJulia, state.fractalType, state.stripes,
                 state.stripeFrequency, state.innerCalculation);
@@ -195,7 +173,6 @@ sf::Color calculateAntiAliasedColor(int x, int y, const RenderState& state, int 
         }
     }
 
-    // Average the samples
     int totalR = 0, totalG = 0, totalB = 0;
     for (const auto& color : sampleColors) {
         totalR += color.r;
@@ -211,7 +188,6 @@ sf::Color calculateAntiAliasedColor(int x, int y, const RenderState& state, int 
     );
 }
 
-// Render the fractal using multiple threads
 void renderFractal(sf::Uint8* pixels, const RenderState& state, int width, int height, bool usePreview = false) {
     if (usePreview) {
         renderPreview(pixels, state, width, height, PREVIEW_DOWNSCALE);
@@ -232,7 +208,6 @@ void renderFractal(sf::Uint8* pixels, const RenderState& state, int width, int h
     }
 }
 
-// Render a region of the fractal (for multi-threading)
 void renderFractalRegion(sf::Uint8* pixels, const RenderState& state, int startY, int endY, int width, int height) {
     double pixelHeight = state.viewportHeight / height;
     double pixelWidth = state.getViewportWidth() / width;
@@ -244,16 +219,13 @@ void renderFractalRegion(sf::Uint8* pixels, const RenderState& state, int startY
         for (int x = 0; x < width; x++) {
             sf::Color color;
 
-            // Use anti-aliasing if enabled
             if (state.antiAliasing) {
                 color = calculateAntiAliasedColor(x, y, state, width, height, palette);
             }
             else {
-                // Standard single-sample rendering
                 double cr = state.viewportX - halfWidth + x * pixelWidth;
                 double ci = state.viewportY - halfHeight + y * pixelHeight;
 
-                // Calculate iterations
                 ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
                     state.maxIterations, state.showJulia, state.fractalType, state.stripes, state.stripeFrequency, state.innerCalculation);
 
@@ -284,7 +256,6 @@ void renderFractalRegion(sf::Uint8* pixels, const RenderState& state, int startY
 }
 
 
-// Render low-resolution preview for faster interaction
 void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int height, int downscale) {
     double pixelHeight = state.viewportHeight / height;
     double pixelWidth = state.getViewportWidth() / width;
@@ -298,7 +269,6 @@ void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int h
         for (int x = 0; x < width; x += downscale) {
             double cr = state.viewportX - halfWidth + x * pixelWidth;
 
-            // Calculate iterations
             ReturnInfo info = calculateFractal(cr, ci, state.juliaX, state.juliaY,
                 state.maxIterations, state.showJulia, state.fractalType, state.stripes, state.stripeFrequency, state.innerCalculation);
 
@@ -320,7 +290,6 @@ void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int h
                 color = interpolateColors(palette[index], palette[(index + 1) % palette.size()], fract);
             }
 
-            // Fill block with the same color
             for (int by = 0; by < downscale && y + by < height; by++) {
                 for (int bx = 0; bx < downscale && x + bx < width; bx++) {
                     int idx = ((y + by) * width + (x + bx)) * 4;
@@ -335,7 +304,6 @@ void renderPreview(sf::Uint8* pixels, const RenderState& state, int width, int h
 }
 
 
-// Save screenshot with location info in filename
 void saveScreenshot(const sf::Texture& texture, const RenderState& state) {
     sf::Image screenshot = texture.copyToImage();
 
@@ -360,7 +328,6 @@ void saveScreenshot(const sf::Texture& texture, const RenderState& state) {
 }
 
 void outputStateDetails(const RenderState& state) {
-    std::cout << std::fixed << std::setprecision(25); // Set precision here on cout
 
     std::cout << "--- State Details ---" << '\n';
     std::cout << "x = " << state.viewportX << '\n';
@@ -368,27 +335,20 @@ void outputStateDetails(const RenderState& state) {
     std::cout << "zoom = " << state.viewportHeight << '\n';
     std::cout << "cd = " << state.colorDensity << '\n';
 
-    // If maxIterations is an int, no need for precision
-    std::cout.unsetf(std::ios::fixed); // Unset fixed for default int printing
     std::cout << "maxit = " << state.maxIterations << '\n';
 }
 
 
-// Add this function to create and save high resolution screenshots
 void saveHighResScreenshot(const RenderState& state, int width, int height, int scale) {
-    // Create high-resolution pixel buffer
     int hiResWidth = width * scale;
     int hiResHeight = height * scale;
     sf::Uint8* hiResPixels = new sf::Uint8[hiResWidth * hiResHeight * 4];
 
     std::cout << "Rendering high-resolution screenshot (" << hiResWidth << "x" << hiResHeight << ")..." << std::endl;
 
-    // Render the fractal at high resolution
     RenderState hiResState = state;
-    // Adjust pixel density without changing view dimensions
     hiResState.viewportX = state.viewportX;
 
-    // Use multi-threading to render high-res image
     std::vector<std::thread> threads;
     int linesPerThread = hiResHeight / NUM_THREADS;
 
@@ -402,7 +362,6 @@ void saveHighResScreenshot(const RenderState& state, int width, int height, int 
         thread.join();
     }
 
-    // Create image and save it
     sf::Image screenshot;
     screenshot.create(hiResWidth, hiResHeight, hiResPixels);
 
@@ -426,7 +385,6 @@ void saveHighResScreenshot(const RenderState& state, int width, int height, int 
     screenshot.saveToFile(filename.str());
     std::cout << "High-resolution screenshot saved: " << filename.str() << std::endl;
 
-    // Free memory
     delete[] hiResPixels;
 }
 
@@ -445,7 +403,6 @@ std::string getInfoString(const RenderState& state, double mouseX, double mouseY
     return ss.str();
 }
 
-// Auto-adjust iterations based on zoom level
 void adjustIterations(RenderState& state) {
     if (state.autoIterations) {
         double zoomFactor = 3.0 / state.viewportHeight;
@@ -457,7 +414,6 @@ void adjustIterations(RenderState& state) {
 int main() {
     std::cout << "Starting Fractal Explorer with " << NUM_THREADS << " threads" << std::endl;
 
-    // Create window and rendering resources
     sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), WINDOW_TITLE);
     window.setFramerateLimit(60);
 
@@ -470,11 +426,9 @@ int main() {
     sf::Sprite sprite(texture);
     sf::Uint8* pixels = new sf::Uint8[WINDOW_WIDTH * WINDOW_HEIGHT * 4];
 
-    // Load font for text display
     sf::Font font;
     bool hasFontLoaded = font.loadFromFile("arial.ttf");
     if (!hasFontLoaded) {
-        // Try system fonts as fallback
 #ifdef _WIN32
         hasFontLoaded = font.loadFromFile("C:\\Windows\\Fonts\\arial.ttf");
 #elif __APPLE__
@@ -503,7 +457,6 @@ int main() {
         performanceText.setPosition(10, WINDOW_HEIGHT - 30);
     }
 
-    // Initialize state and render
     RenderState state;
     adjustIterations(state);
 
@@ -515,19 +468,16 @@ int main() {
     std::cout << "Initial render: " << duration << "ms" << std::endl;
     texture.update(pixels);
 
-    // Tracking variables
     sf::Vector2i lastMousePos;
     bool isDragging = false;
     std::string renderTimeStr = "Render time: " + std::to_string(duration) + "ms";
     sf::Vector2i currentMousePos;
     double mouseComplexX = 0, mouseComplexY = 0;
 
-    // High-quality render control
     bool viewChanged = false;
     sf::Clock scrollTimer;
     bool pendingHighQualityRender = false;
 
-    // Main loop
     while (window.isOpen()) {
         sf::Event event;
         bool needsRedraw = false;
@@ -563,7 +513,6 @@ int main() {
                 }
             }
 
-            // Handle mouse button events for dragging
             if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
                 isDragging = true;
                 usePreview = true;
@@ -576,7 +525,6 @@ int main() {
                 scrollTimer.restart();
             }
 
-            // Handle mouse movement for panning and tracking
             if (event.type == sf::Event::MouseMoved) {
                 currentMousePos = sf::Mouse::getPosition(window);
 
@@ -604,10 +552,8 @@ int main() {
                 }
             }
 
-            // Key press events
             if (event.type == sf::Event::KeyPressed) {
                 switch (event.key.code) {
-                case sf::Keyboard::R: // Reset view
                     state.viewportX = -0.5;
                     state.viewportY = 0.0;
                     state.viewportHeight = 3.0;
@@ -616,81 +562,63 @@ int main() {
                     viewChanged = false;
                     pendingHighQualityRender = true;
                     break;
-                case sf::Keyboard::J: // Toggle Julia/Mandelbrot
                     state.showJulia = !state.showJulia;
                     if (!state.showJulia) {
-                        // When switching back to Mandelbrot, reset Julia seed to mouse position
                         state.juliaX = mouseComplexX;
                         state.juliaY = mouseComplexY;
                     }
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::C: // Change color scheme
                     state.colorScheme = (state.colorScheme + 1) % PALETTES.size();
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::S: // Screenshot
                     if (sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) ||
                         sf::Keyboard::isKeyPressed(sf::Keyboard::RShift)) {
-                        // High-resolution screenshot
                         saveHighResScreenshot(state, WINDOW_WIDTH, WINDOW_HEIGHT, SCREENSHOT_SCALE);
                     }
                     else {
                         saveScreenshot(texture, state);
                     }
                     break;
-                case sf::Keyboard::I: // Increase iterations
                     state.maxIterations = static_cast<int>(state.maxIterations * 1.5);
                     state.autoIterations = false;
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::K: // Decrease iterations
                     state.maxIterations = std::max(50, static_cast<int>(state.maxIterations / 1.5));
                     state.autoIterations = false;
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::A: // Toggle auto iterations
                     state.autoIterations = !state.autoIterations;
                     if (state.autoIterations) {
                         adjustIterations(state);
                         needsRedraw = true;
                     }
                     break;
-                case sf::Keyboard::T: // Toggle fractal type
-                    state.fractalType = (state.fractalType + 1) % 2; // Currently 2 types (0=Mandelbrot, 1=Burning Ship)
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::B: // Toggle stripe effect
                     state.stripes = !state.stripes;
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::F: // Toggle anti-aliasing
                     state.antiAliasing = !state.antiAliasing;
                     needsRedraw = true;
                     pendingHighQualityRender = true;
                     break;
-                case sf::Keyboard::N: // Toggle inner calculation
                     state.innerCalculation = !state.innerCalculation;
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::Up: // Increase color density
                     state.colorDensity *= 1.2f;
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::Down: // Decrease color density
                     state.colorDensity /= 1.2f;
                     needsRedraw = true;
                     break;
-                case sf::Keyboard::P: // Show details
                     outputStateDetails(state);
                     break;
-                case sf::Keyboard::Left: // Decrease stripe frequency
                     if (state.stripes) {
                         state.stripeFrequency = std::max(1.0f, state.stripeFrequency - 1.0f);
                         needsRedraw = true;
                     }
                     break;
-                case sf::Keyboard::Right: // Increase stripe frequency
                     if (state.stripes) {
                         state.stripeFrequency += 1.0f;
                         needsRedraw = true;
@@ -700,13 +628,11 @@ int main() {
             }
         }
 
-        // Check if we need to render a high-quality image after scrolling/panning stops
         if (viewChanged && scrollTimer.getElapsedTime().asSeconds() > SCROLL_RENDER_DELAY) {
             pendingHighQualityRender = true;
             viewChanged = false;
         }
 
-        // Perform high-quality render if needed
         if (pendingHighQualityRender) {
             startTime = std::chrono::high_resolution_clock::now();
             renderFractal(pixels, state, WINDOW_WIDTH, WINDOW_HEIGHT, false);
@@ -717,7 +643,6 @@ int main() {
             pendingHighQualityRender = false;
         }
         else if (needsRedraw) {
-            // Use low-quality preview for interactive movements
             startTime = std::chrono::high_resolution_clock::now();
             renderFractal(pixels, state, WINDOW_WIDTH, WINDOW_HEIGHT, usePreview);
             endTime = std::chrono::high_resolution_clock::now();
@@ -727,18 +652,15 @@ int main() {
             texture.update(pixels);
         }
 
-        // Update text displays
         if (hasFontLoaded) {
             infoText.setString(getInfoString(state, mouseComplexX, mouseComplexY));
             performanceText.setString(renderTimeStr);
         }
 
-        // Draw everything
         window.clear();
         window.draw(sprite);
 
         if (hasFontLoaded) {
-            // Draw semi-transparent background for text
             sf::RectangleShape textBg(sf::Vector2f(350, 180));
             textBg.setFillColor(sf::Color(0, 0, 0, 180));
             textBg.setPosition(5, 5);
@@ -751,7 +673,6 @@ int main() {
         window.display();
     }
 
-    // Clean up
     delete[] pixels;
 
     return 0;
